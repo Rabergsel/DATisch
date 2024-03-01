@@ -1,0 +1,51 @@
+FUNCTION_BLOCK "0_FB_SCL_Zylinder_2V_2ES"
+{ S7_Optimized_Access := 'TRUE' }
+VERSION : 0.1
+   VAR_INPUT 
+      ausfahren { S7_HiddenAssignment := 'Hide'} : Bool;
+      einfahren { S7_HiddenAssignment := 'Hide'} : Bool;
+      diEndschalter_ausgefahren : Bool;
+      diEndschalter_eingefahren : Bool;
+      diNotAus : Bool;
+   END_VAR
+
+   VAR_OUTPUT 
+      doVentil_ausfahren { S7_HiddenAssignment := 'Show'} : Bool;
+      doVentil_einfahren { S7_HiddenAssignment := 'Show'} : Bool;
+      ist_ausgefahren { S7_HiddenAssignment := 'Hide'} : Bool;
+      ist_eingefahren { S7_HiddenAssignment := 'Hide'} : Bool;
+   END_VAR
+
+   VAR 
+      Ventil_ausfahren { ExternalAccessible := 'False'; ExternalVisible := 'False'; ExternalWritable := 'False'} : Bool;
+      Ventil_einfahren { ExternalAccessible := 'False'; ExternalVisible := 'False'; ExternalWritable := 'False'} : Bool;
+      R_TRIG_einfahren {InstructionName := 'R_TRIG'; LibVersion := '1.0'} : R_TRIG;
+      R_TRIG_ausfahren {InstructionName := 'R_TRIG'; LibVersion := '1.0'} : R_TRIG;
+   END_VAR
+
+
+BEGIN
+	#R_TRIG_ausfahren.CLK := #ausfahren;        //Give Trigger current data
+	#R_TRIG_einfahren.CLK := #einfahren;        //Give Trigger current data
+	
+	IF #R_TRIG_einfahren.Q AND NOT #diEndschalter_eingefahren THEN  //If triggered, and not in an end position
+	    #Ventil_einfahren := true;              //Move in
+	END_IF; 
+	IF #diEndschalter_eingefahren THEN          //Stop when reaching end position
+	    #Ventil_einfahren := false;             //Stop moving
+	END_IF;
+	
+	IF #ausfahren AND NOT #diEndschalter_ausgefahren THEN   //If triggered, and not in an end position
+	    #Ventil_ausfahren := true;                          //Move In
+	END_IF;
+	IF #diEndschalter_ausgefahren THEN                      //Stop when reaching end position
+	    #Ventil_ausfahren := false;                         //Stop moving
+	END_IF;
+	
+	#ist_eingefahren := #diEndschalter_eingefahren;        //Pass endposition sensor through code
+	#ist_ausgefahren := #diEndschalter_ausgefahren;        //Pass endposition sensor through code
+	
+	#ausfahren := FALSE;                        //Reset commands
+	#einfahren := FALSE;                        //Reset commands
+END_FUNCTION_BLOCK
+
