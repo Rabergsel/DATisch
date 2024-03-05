@@ -1,0 +1,42 @@
+FUNCTION_BLOCK "1_FB_SCL_Zylinder_1V_2ES"
+{ S7_Optimized_Access := 'TRUE' }
+VERSION : 0.1
+   VAR_INPUT 
+      ausfahren { S7_HiddenAssignment := 'Hide'} : Bool;
+      einfahren { S7_HiddenAssignment := 'Hide'} : Bool;
+      diEndschalter_ausgefahren : Bool;
+      diEndschalter_eingefahren : Bool;
+      diNotAus : Bool;
+   END_VAR
+
+   VAR_OUTPUT 
+      doVentil { S7_HiddenAssignment := 'Show'} : Bool;
+      ist_ausgefahren { S7_HiddenAssignment := 'Hide'} : Bool;
+      ist_eingefahren { S7_HiddenAssignment := 'Hide'} : Bool;
+   END_VAR
+
+   VAR 
+      Ventil_ausfahren { ExternalAccessible := 'False'; ExternalVisible := 'False'; ExternalWritable := 'False'} : Bool;
+      Ventil_einfahren { ExternalAccessible := 'False'; ExternalVisible := 'False'; ExternalWritable := 'False'} : Bool;
+      R_TRIG_einfahren {InstructionName := 'R_TRIG'; LibVersion := '1.0'} : R_TRIG;
+      R_TRIG_ausfahren {InstructionName := 'R_TRIG'; LibVersion := '1.0'} : R_TRIG;
+      Static_1 {InstructionName := 'R_TRIG'; LibVersion := '1.0'} : R_TRIG;
+   END_VAR
+
+
+BEGIN
+	#R_TRIG_ausfahren.CLK := #ausfahren;        //Give Trigger current data
+	#R_TRIG_einfahren.CLK := #einfahren;        //Give Trigger current data
+	
+	IF #R_TRIG_ausfahren.Q AND NOT #diEndschalter_ausgefahren THEN      //If triggered and sensor is okay
+	    #doVentil := TRUE;                                              //Set output to true and don't let it fall
+	END_IF;
+	
+	IF #R_TRIG_einfahren.Q AND NOT #diEndschalter_eingefahren THEN      //If triggered and sensor is okay
+	    #doVentil := FALSE;                                             //Set output to false and don't let it rise
+	END_IF;
+	
+	#ausfahren := FALSE;                        //Reset commands
+	#einfahren := FALSE;                        //Reset commands
+END_FUNCTION_BLOCK
+
