@@ -1,57 +1,230 @@
 FUNCTION_BLOCK "1_FB_SCL_Zylinder_1V_2ES"
 { S7_Optimized_Access := 'TRUE' }
 VERSION : 0.1
-   VAR_INPUT 
-      ausfahren { S7_HiddenAssignment := 'Hide'} : Bool;
-      einfahren { S7_HiddenAssignment := 'Hide'} : Bool;
-      diEndschalter_ausgefahren : Bool;
-      diEndschalter_eingefahren : Bool;
-      diNotAus : Bool;
-   END_VAR
-
-   VAR_OUTPUT 
-      doVentil { S7_HiddenAssignment := 'Show'} : Bool;
-      ist_ausgefahren { S7_HiddenAssignment := 'Hide'} : Bool;
-      ist_eingefahren { S7_HiddenAssignment := 'Hide'} : Bool;
-      hatProblem : Bool;
+   VAR_IN_OUT 
+      EndschalterEingefahren : "FB_SCL_Sensor";
+      VentilAusfahren : "FB_SCL_Aktor";
+      EndschalterAusgefahren : "FB_SCL_Sensor";
+      Anlage : "Type_Anlage";
    END_VAR
 
    VAR 
-      Ventil_ausfahren { ExternalAccessible := 'False'; ExternalVisible := 'False'; ExternalWritable := 'False'} : Bool;
-      Ventil_einfahren { ExternalAccessible := 'False'; ExternalVisible := 'False'; ExternalWritable := 'False'} : Bool;
-      R_TRIG_einfahren {InstructionName := 'R_TRIG'; LibVersion := '1.0'} : R_TRIG;
-      R_TRIG_ausfahren {InstructionName := 'R_TRIG'; LibVersion := '1.0'} : R_TRIG;
-      Static_1 {InstructionName := 'R_TRIG'; LibVersion := '1.0'} : R_TRIG;
+      Status : Struct
+         istAusgefahren : Bool;
+         istEingefahren : Bool;
+         Fehler : Bool;
+         Bereit : Bool;
+      END_STRUCT;
+      Parameter : Struct
+         timeoutEinfahrenMS : Int := 1000;
+         timeoutAusfahrenMS : Int := 1000;
+         ZeitDruckaufbauMS : Int := 250;
+         WartezeitInitMS : Int := 250;
+      END_STRUCT;
+      Kommando : Struct
+         einfahren : Bool;
+         ausfahren : Bool;
+         einzelschrittStart : Bool;
+      END_STRUCT;
+      StaticOutput : Bool;   // Static Variable to set for output
+      StateMachine : Struct
+         CurrentState : Int := 999;
+         NextState : Int;
+         StateStartTimeMS : UDInt;
+      END_STRUCT;
+   END_VAR
+
+   VAR_TEMP 
+      CurrentTimeMS : UDInt;
+      stateActiveTimeMS : UDInt;
+   END_VAR
+
+   VAR CONSTANT 
+      STATE_INIT : Int := 0;
+      STATE_BUILDPRESSURE : Int := 1;
+      STATE_READY : Int := 2;
+      STATE_SINGLEEXTEND : Int := 3;
+      STATE_EXTEND : Int := 4;
+      STATE_ENDPOS : Int := 5;
+      STATE_ERROR : Int := 6;
+      STATE_SINGLERETRACT : Int := 7;
+      STATE_RETRACT : Int := 8;
    END_VAR
 
 
 BEGIN
-	#R_TRIG_ausfahren.CLK := #ausfahren;        //Give Trigger current data
-	#R_TRIG_einfahren.CLK := #einfahren;        //Give Trigger current data
+	//Copied code from 0_FB_SCL_Zylinder_2V_2ES,
+	//Output is now a static variable ("StaticOutput"), which is written to the output at the end
+	//There is no Valve for Contraction
 	
-	IF #diNotAus THEN                               //In case of emergency stop, ignore everything, don't change, don't move
-	    #ausfahren := FALSE;                        //Reset commands
-	    #einfahren := FALSE;                        //Reset commands
-	    #hatProblem := TRUE;                        //Say that Cylinder didn't execute
+	REGION NotHalt
 	    
-	    //A one-valve cylinder will move less if we do not change states.
-	    //We cannot switch off if switched on, as it would return to start position.
-	    //We cannot switch on, as it would obviously elongate.
+	    IF #Anlage.NotHalt THEN
+	        #VentilAusfahren.Kommando.Value := FALSE;
+	        RETURN;
+	    END_IF;
+	
+	END_REGION
+	
+	REGION Timing
+	    // get current time
+	    "getTimestamp"(#CurrentTimeMS);
 	    
-	    RETURN;
-	END_IF;
+	    
+	    // check if a state transition is neccessary and store the time
+	    IF (#StateMachine.NextState <> #StateMachine.CurrentState) THEN
+	        // state transition occured!
+	        #StateMachine.CurrentState := #StateMachine.NextState;        // activate the new state
+	        #StateMachine.StateStartTimeMS := #CurrentTimeMS;  // store the time when the state was activated
+	    END_IF;
+	    
+	    // calculate the time the state is already active
+	    #stateActiveTimeMS := #CurrentTimeMS - #StateMachine.StateStartTimeMS;
+	END_REGION
 	
-	IF #R_TRIG_ausfahren.Q AND NOT #diEndschalter_ausgefahren THEN      //If triggered and sensor is okay
-	    #doVentil := TRUE;                                              //Set output to true and don't let it fall
-	END_IF;
+	REGION Logik
+	    
+	    CASE #StateMachine.CurrentState OF
+	            
+	        #STATE_INIT:  //INIT
+	            REGION INIT
 	
-	IF #R_TRIG_einfahren.Q AND NOT #diEndschalter_eingefahren THEN      //If triggered and sensor is okay
-	    #doVentil := FALSE;                                             //Set output to false and don't let it rise
-	END_IF;
+	            IF #stateActiveTimeMS > #Parameter.WartezeitInitMS THEN
+	                #StateMachine.NextState := #STATE_BUILDPRESSURE;
+	            END_IF;
+	        END_REGION
+	        
+	        #STATE_BUILDPRESSURE:
+	            REGION BUILD PRESSURE
+	            #Status.Fehler := FALSE;
+	            
+	            IF (#EndschalterAusgefahren.Status.Value AND #EndschalterEingefahren.Status.Value) OR (NOT #EndschalterAusgefahren.Status.Value AND NOT #EndschalterEingefahren.Status.Value) THEN
+	                #Status.Fehler := TRUE;
+	                #StaticOutput := FALSE;
+	                #StateMachine.NextState := #STATE_READY;
+	            END_IF;
+	            
+	            IF #EndschalterAusgefahren.Status.Value AND NOT #EndschalterEingefahren.Status.Value THEN
+	                #StaticOutput := TRUE;
+	            ELSIF #EndschalterEingefahren.Status.Value AND NOT #EndschalterAusgefahren.Status.Value THEN
+	                #StaticOutput := FALSE;
+	            END_IF;
+	            
+	            IF #stateActiveTimeMS > #Parameter.ZeitDruckaufbauMS THEN
+	                #StaticOutput := FALSE;
+	                #StateMachine.NextState := #STATE_READY;
+	            END_IF;
+	                
+	        END_REGION
+	        
+	        #STATE_READY:
+	            REGION Ready
+	                #Status.Bereit := true;
+	                IF #Kommando.ausfahren AND NOT #VentilAusfahren.Kommando.Value THEN
+	                    #StateMachine.NextState := #STATE_SINGLEEXTEND;
+	                END_IF;
+	                
+	                IF #Kommando.einfahren AND NOT #EndschalterEingefahren.Status.Value THEN
+	                    #StateMachine.NextState := #STATE_SINGLERETRACT;
+	                END_IF;
+	                
+	            END_REGION
+	            
+	        #STATE_SINGLEEXTEND:
+	            REGION Single Step Extension
+	                
+	                #Status.Bereit := false;
+	                
+	                IF NOT #Anlage.Modus.Hand THEN
+	                    #StateMachine.NextState := #STATE_READY;
+	                END_IF;
+	                
+	                IF #Anlage.Modus.Hand AND #Kommando.einzelschrittStart THEN
+	                    #StateMachine.NextState := #STATE_EXTEND;
+	                END_IF;
+	                
+	                IF #Anlage.Modus.Auto OR #Anlage.Modus.Grundstellung THEN
+	                    #StateMachine.NextState := #STATE_EXTEND;
+	                END_IF;
+	                
+	            END_REGION
+	            
+	        #STATE_EXTEND:
+	            REGION Extension
+	                //Extend
+	                #StaticOutput := TRUE;
+	                IF #EndschalterAusgefahren.Status.Value THEN
+	                    #StateMachine.NextState := #STATE_ENDPOS;
+	                END_IF;
+	                
+	                IF #stateActiveTimeMS > #Parameter.timeoutAusfahrenMS THEN
+	                    #StateMachine.NextState := #STATE_ERROR;
+	                END_IF;
+	            END_REGION;
+	            
+	        #STATE_SINGLERETRACT:
+	            REGION Single Step Retract
+	                
+	                #Status.Bereit := false;
+	                
+	                IF NOT #Anlage.Modus.Hand THEN
+	                    #StateMachine.NextState := #STATE_READY;
+	                END_IF;
+	                
+	                IF #Anlage.Modus.Hand AND #Kommando.einzelschrittStart THEN
+	                    #StateMachine.NextState := #STATE_RETRACT;
+	                END_IF;
+	                
+	                IF #Anlage.Modus.Auto OR #Anlage.Modus.Grundstellung THEN
+	                    #StateMachine.NextState := #STATE_RETRACT;
+	                END_IF;
+	                
+	            END_REGION
+	            
+	        #STATE_RETRACT:
+	            REGION Retraction
+	                //Retract
+	                #StaticOutput := FALSE;
+	                IF #EndschalterEingefahren.Status.Value THEN
+	                    #StateMachine.NextState := #STATE_ENDPOS;
+	                END_IF;
+	                
+	                IF #stateActiveTimeMS > #Parameter.timeoutEinfahrenMS THEN
+	                    #StateMachine.NextState := #STATE_ERROR;
+	                END_IF;
+	            END_REGION
+	            
+	        #STATE_ENDPOS:
+	            REGION End Position
+	                #Status.Fehler := false;
+	                #StateMachine.NextState := #STATE_READY;
+	            END_REGION;
+	            
+	        #STATE_ERROR:
+	            REGION End Position
+	                //Do not change output, as a change would generate movement
+	                #Status.Fehler := true;
+	                #StateMachine.NextState := #STATE_READY;
+	            END_REGION ;
+	            
+	            
+	    END_CASE;
+	    
+	    
+	END_REGION
 	
-	//MEOW
+	REGION KommandoReset
+	    
+	    #Kommando.ausfahren := FALSE;
+	    #Kommando.einfahren := FALSE;
+	    #Kommando.einzelschrittStart := FALSE;
 	
-	#ausfahren := FALSE;                        //Reset commands
-	#einfahren := FALSE;                        //Reset commands
+	END_REGION
+	
+	REGION Output
+	    #VentilAusfahren.Kommando.Value := #StaticOutput;
+	    #Status.istAusgefahren := #EndschalterAusgefahren.Status.Value;
+	    #Status.istEingefahren := #EndschalterEingefahren.Status.Value;
+	END_REGION
 END_FUNCTION_BLOCK
 
