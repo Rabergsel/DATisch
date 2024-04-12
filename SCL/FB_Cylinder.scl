@@ -1,0 +1,63 @@
+FUNCTION_BLOCK "FB_SCL_Zylinder"
+{ S7_Optimized_Access := 'TRUE' }
+VERSION : 0.1
+   VAR_INPUT 
+      ausfahren { S7_HiddenAssignment := 'Hide'} : Bool;
+      einfahren { S7_HiddenAssignment := 'Hide'} : Bool;
+      diEndschalter_ausgefahren : Bool;
+      diEndschalter_eingefahren : Bool;
+      diNotAus : Bool;
+      numVentile : Int := 2;   // Nummer: siehe Zylinder/FB/Varianten
+      numEndschalter : Int := 2;
+   END_VAR
+
+   VAR_OUTPUT 
+      doVentil_ausfahren { S7_HiddenAssignment := 'Show'} : Bool;
+      doVentil_einfahren { S7_HiddenAssignment := 'Show'} : Bool;
+      ist_ausgefahren { S7_HiddenAssignment := 'Hide'} : Bool;
+      ist_eingefahren { S7_HiddenAssignment := 'Hide'} : Bool;
+   END_VAR
+
+   VAR 
+      Zylinder_2V_2ES : "0_FB_SCL_Zylinder_2V_2ES";
+      Zylinder_1V_2ES : "1_FB_SCL_Zylinder_1V_2ES";
+   END_VAR
+
+
+BEGIN
+	//Cylinder with 2 sensors and 2 valves
+	IF #numEndschalter = 2 AND #numVentile=2 THEN
+	    
+	    //Direct signals
+	    #Zylinder_2V_2ES.ausfahren := #ausfahren;
+	    #Zylinder_2V_2ES.einfahren := #einfahren;
+	    #Zylinder_2V_2ES.diNotAus  := #diNotAus;
+	    
+	    //Sensor signals
+	    #Zylinder_2V_2ES.diEndschalter_ausgefahren := #diEndschalter_ausgefahren;
+	    #Zylinder_2V_2ES.diEndschalter_eingefahren := #diEndschalter_eingefahren;
+	    
+	    //Write output
+	    #ist_ausgefahren := #Zylinder_2V_2ES.ist_ausgefahren;
+	    #ist_eingefahren := #Zylinder_2V_2ES.ist_eingefahren;
+	    
+	END_IF;
+	
+	IF #numEndschalter = 2 AND #numVentile = 1 THEN
+	    
+	    //Direct signals
+	    #Zylinder_1V_2ES.ausfahren := #ausfahren;
+	    #Zylinder_1V_2ES.einfahren := #einfahren;
+	    #Zylinder_1V_2ES.diNotAus := #diNotAus;
+	    
+	    //Sensor signals
+	    #Zylinder_1V_2ES.diEndschalter_ausgefahren := #diEndschalter_ausgefahren;
+	    #Zylinder_1V_2ES.diEndschalter_eingefahren := #diEndschalter_eingefahren;
+	    
+	    //Write output
+	    #ist_ausgefahren := #Zylinder_1V_2ES.ist_ausgefahren;
+	    #ist_eingefahren := #Zylinder_1V_2ES.ist_eingefahren;
+	    
+	END_IF;
+END_FUNCTION_BLOCK
+
